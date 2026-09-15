@@ -337,6 +337,10 @@ model Order {
   customerName        String?
   customerPhone       String?
   customerAddress     String?
+  createdById         String
+  createdBy           User     @relation(fields: [createdById], references: [id])
+  shiftId             String?
+  shift               Shift?   @relation(fields: [shiftId], references: [id])
   items               OrderItem[]
   subtotal            Int      // In cents
   discount            Int      @default(0) // Line + order discount
@@ -346,7 +350,6 @@ model Order {
   payments            Payment[]
   parkedCart          Json?    // Saved cart data for park/resume
   notes               String?
-  createdBy           String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   paidAt              DateTime?
