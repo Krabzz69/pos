@@ -2,40 +2,47 @@
 # Dependencies
 node_modules/
 
-# Environment variables
+# Prisma
+prisma/migrations/
+prisma/schema.prisma.backup
+
+# Environment
 .env
 .env.local
 .env.*
 
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-
 # Logs
 *.log
 
-# Temp files
+# Temporary files
 *.tmp
+*.swp
 
-# Build artifacts
+# IDE
+.vscode/
+.idea/
+
+# Build outputs
 dist/
 build/
 target/
 
-# Python cache
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.Python
+venv/
+.venv/
+.env
 
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# OS generated files
+# OS
 .DS_Store
 Thumbs.db
 ```

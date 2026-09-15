@@ -33,7 +33,7 @@ async function main() {
   // Create owner user
   const ownerPassword = await hashPassword('owner123');
   const owner = await prisma.user.upsert({
-    where: { email: 'owner@demo.com' },
+    where: { tenantId_email: { tenantId: tenant.id, email: 'owner@demo.com' } },
     update: {},
     create: {
       id: uuidv4(),
