@@ -8,10 +8,10 @@ interface AuthSocket extends Socket {
   tenantId?: string;
 }
 
-export let io: Server | null = null;
+let ioInstance: Server | null = null;
 
 export function setupSocketIO(server: any) {
-  io = new Server(server, {
+  ioInstance = new Server(server, {
     cors: {
       origin: process.env.NODE_ENV === 'production' ? false : true,
       credentials: true,
@@ -19,9 +19,9 @@ export function setupSocketIO(server: any) {
   });
 
   // Middleware for socket authentication
-  io.use(async (socket: AuthSocket, next) => {
+  ioInstance.use(async (socket: AuthSocket, next) => {
     const token = socket.handshake.auth.token || socket.handshake.query.token;
-    
+
     if (!token) {
       return next(new Error('Authentication required'));
     }
@@ -49,7 +49,7 @@ export function setupSocketIO(server: any) {
     }
   });
 
-  io.on('connection', (socket: AuthSocket) => {
+  ioInstance.on('connection', (socket: AuthSocket) => {
     console.log(`Socket connected: ${socket.id} for tenant ${socket.tenantId}`);
 
     // Join tenant-specific rooms
@@ -90,7 +90,12 @@ export function setupSocketIO(server: any) {
     });
   });
 
-  return io;
+  return ioInstance;
+}
+
+// Helper function to get the IO instance
+export function getIo(): Server | null {
+  return ioInstance;
 }
 
 // Helper function to emit events to tenant rooms

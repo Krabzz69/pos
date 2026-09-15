@@ -1,4 +1,3 @@
-import { Router, Request } from 'express';
 import http from 'http';
 import cors from 'cors';
 import express from 'express';
@@ -11,6 +10,8 @@ import { ordersRouter } from './modules/orders/orders.routes';
 import { kitchenRouter } from './modules/kitchen/kitchen.routes';
 import { onlineRouter } from './modules/online/online.routes';
 import { paymentsRouter } from './modules/payments/payments.routes';
+import { adminRouter } from './modules/admin/admin.routes';
+import { superadminRouter } from './modules/superadmin/superadmin.routes';
 import { setupSocketIO } from './utils/socket';
 import { PORT, NODE_ENV } from './config/env';
 
@@ -29,7 +30,7 @@ app.use(cors({
 app.use(express.json());
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -42,6 +43,8 @@ app.use('/api/orders', ordersRouter);
 app.use('/api/kitchen', kitchenRouter);
 app.use('/api/online', onlineRouter);
 app.use('/api/payments', paymentsRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/superadmin', superadminRouter);
 
 // Payment webhook endpoint (for MCB Juice / Peach Payments)
 app.post('/api/webhooks/payments/:tenantId', async (req, res) => {
@@ -65,7 +68,7 @@ app.post('/api/webhooks/payments/:tenantId', async (req, res) => {
 });
 
 // Error handling middleware
-app.use((err: any, req: Request, res: any, next: any) => {
+app.use((err: any, _req: express.Request, res: any, _next: any) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
     error: NODE_ENV === 'development' ? err.message : 'Internal server error',

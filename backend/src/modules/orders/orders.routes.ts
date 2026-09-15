@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../config/database';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { getTenantIdFromRequest } from '../../utils/tenant';
-import { io } from '../../utils/socket';
+import { getIo } from '../../utils/socket';
 import { UserRole } from '@prisma/client';
 
 export const ordersRouter = Router();
@@ -232,7 +232,7 @@ ordersRouter.post('/', authenticate, requireRole([UserRole.CASHIER, UserRole.MAN
     });
 
     // Emit socket event
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('order:created', {
+    getIo().to(`${tenantId}:all`).emit('order:created', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       type,
@@ -242,7 +242,7 @@ ordersRouter.post('/', authenticate, requireRole([UserRole.CASHIER, UserRole.MAN
     });
 
     if (order.status === 'PAID') {
-      (io || await import(.utils/socket.)).to(`${tenantId}:kitchen`).emit('kitchen:new-order', {
+      getIo().to(`${tenantId}:kitchen`).emit('kitchen:new-order', {
         orderId: order.id,
         orderNumber: order.orderNumber,
         type,
@@ -279,7 +279,7 @@ ordersRouter.patch('/:id/status', authenticate, async (req, res) => {
       data: { status },
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('order:status-changed', {
+    getIo().to(`${tenantId}:all`).emit('order:status-changed', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       status,
@@ -314,7 +314,7 @@ ordersRouter.patch('/:id/park', authenticate, async (req, res) => {
       },
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:pos`).emit('order:parker-updated', {
+    getIo().to(`${tenantId}:pos`).emit('order:parker-updated', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       isParked: park,
@@ -353,7 +353,7 @@ ordersRouter.patch('/:id/cancel', authenticate, requireRole([UserRole.MANAGER, U
       },
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('order:cancelled', {
+    getIo().to(`${tenantId}:all`).emit('order:cancelled', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       reason,
@@ -404,7 +404,7 @@ ordersRouter.post('/:id/refund', authenticate, requireRole([UserRole.MANAGER, Us
       },
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('order:refunded', {
+    getIo().to(`${tenantId}:all`).emit('order:refunded', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       amount: refundAmount,

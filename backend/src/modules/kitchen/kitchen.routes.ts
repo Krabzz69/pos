@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../config/database';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { getTenantIdFromRequest } from '../../utils/tenant';
-import { io } from '../../utils/socket';
+import { getIo } from '../../utils/socket';
 import { UserRole } from '@prisma/client';
 
 export const kitchenRouter = Router();
@@ -94,25 +94,31 @@ kitchenRouter.patch('/orders/:orderId/items/:itemId/status', authenticate, requi
       });
 
       const allReady = allItems.every(item => item.status === 'READY' || item.status === 'COMPLETED');
-      
+
       if (allReady) {
         await prisma.order.update({
           where: { id: orderId },
           data: { status: 'READY' },
         });
 
-        (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('kitchen:order-ready', {
-          orderId,
-          orderNumber: orderItem.orderId,
-        });
+        const io = getIo();
+        if (io) {
+          io.to(`${tenantId}:all`).emit('kitchen:order-ready', {
+            orderId,
+            orderNumber: orderItem.orderId,
+          });
+        }
       }
     }
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:kitchen`).emit('kitchen:item-status-updated', {
-      orderId,
-      itemId,
-      status,
-    });
+    const io = getIo();
+    if (io) {
+      io.to(`${tenantId}:kitchen`).emit('kitchen:item-status-updated', {
+        orderId,
+        itemId,
+        status,
+      });
+    }
 
     res.json(updatedItem);
   } catch (error: any) {
@@ -140,7 +146,7 @@ kitchenRouter.patch('/orders/:orderId/status', authenticate, requireRole([UserRo
 
     const updatedOrder = await prisma.order.update({
       where: { id: orderId },
-      data: { 
+      data: {
         status,
         ...(status === 'PREPARING' ? { preparingAt: new Date() } : {}),
         ...(status === 'READY' ? { readyAt: new Date() } : {}),
@@ -150,16 +156,19 @@ kitchenRouter.patch('/orders/:orderId/status', authenticate, requireRole([UserRo
     // Update all items to match order status
     await prisma.orderItem.updateMany({
       where: { orderId },
-      data: { 
+      data: {
         status: status === 'PREPARING' ? 'PREPARING' : status === 'READY' ? 'READY' : undefined,
       },
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('kitchen:order-status-updated', {
-      orderId,
-      orderNumber: order.orderNumber,
-      status,
-    });
+    const io = getIo();
+    if (io) {
+      io.to(`${tenantId}:all`).emit('kitchen:order-status-updated', {
+        orderId,
+        orderNumber: order.orderNumber,
+        status,
+      });
+    }
 
     res.json(updatedOrder);
   } catch (error: any) {
@@ -171,7 +180,7 @@ kitchenRouter.patch('/orders/:orderId/status', authenticate, requireRole([UserRo
 kitchenRouter.get('/stations', authenticate, async (req, res) => {
   try {
     const tenantId = getTenantIdFromRequest(req);
-    
+
     // Get unique stations from menu items
     const stations = await prisma.menuItem.findMany({
       where: { tenantId },
@@ -260,10 +269,13 @@ kitchenRouter.post('/orders/:orderId/complete', authenticate, requireRole([UserR
       },
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('kitchen:order-completed', {
-      orderId,
-      orderNumber: order.orderNumber,
-    });
+    const io = getIo();
+    if (io) {
+      io.to(`${tenantId}:all`).emit('kitchen:order-completed', {
+        orderId,
+        orderNumber: order.orderNumber,
+      });
+    }
 
     res.json(updatedOrder);
   } catch (error: any) {

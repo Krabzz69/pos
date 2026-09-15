@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../config/database';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { getTenantIdFromRequest } from '../../utils/tenant';
-import { io } from '../../utils/socket';
+import { getIo } from '../../utils/socket';
 import { UserRole } from '@prisma/client';
 
 export const onlineRouter = Router();
@@ -181,7 +181,7 @@ onlineRouter.post('/orders/:tenantSlug', async (req, res) => {
     });
 
     // Emit socket event to POS and kitchen
-    (io || await import(.utils/socket.)).to(`${tenant.id}:all`).emit('online-order:new', {
+    getIo().to(`${tenant.id}:all`).emit('online-order:new', {
       orderId: onlineOrder.id,
       orderNumber: onlineOrder.orderNumber,
       type,
@@ -313,7 +313,7 @@ onlineRouter.post('/orders/:id/accept', authenticate, requireRole([UserRole.MANA
     });
 
     // Push to kitchen display
-    (io || await import(.utils/socket.)).to(`${tenantId}:kitchen`).emit('kitchen:new-online-order', {
+    getIo().to(`${tenantId}:kitchen`).emit('kitchen:new-online-order', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       type: order.type,
@@ -323,7 +323,7 @@ onlineRouter.post('/orders/:id/accept', authenticate, requireRole([UserRole.MANA
     });
 
     // Print ticket notification
-    (io || await import(.utils/socket.)).to(`${tenantId}:pos`).emit('online-order:accepted-print', {
+    getIo().to(`${tenantId}:pos`).emit('online-order:accepted-print', {
       orderNumber: order.orderNumber,
     });
 
@@ -366,7 +366,7 @@ onlineRouter.post('/orders/:id/reject', authenticate, requireRole([UserRole.MANA
       console.log(`Auto-refund triggered for order ${order.orderNumber}`);
     }
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('online-order:rejected', {
+    getIo().to(`${tenantId}:all`).emit('online-order:rejected', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       reason,
@@ -406,7 +406,7 @@ onlineRouter.patch('/orders/:id/status', authenticate, async (req, res) => {
       data: updateData,
     });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('online-order:status-updated', {
+    getIo().to(`${tenantId}:all`).emit('online-order:status-updated', {
       orderId: order.id,
       orderNumber: order.orderNumber,
       status,

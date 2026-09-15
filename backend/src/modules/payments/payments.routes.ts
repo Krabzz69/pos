@@ -2,13 +2,10 @@ import { Router } from 'express';
 import { prisma } from '../../config/database';
 import { authenticate, requireRole } from '../../middleware/auth';
 import { getTenantIdFromRequest } from '../../utils/tenant';
+import { getIo } from '../../utils/socket';
 import { UserRole } from '@prisma/client';
 
 export const paymentsRouter = Router();
-
-// ============================================
-// PAYMENT PROVIDER INTERFACE IMPLEMENTATION
-// ============================================
 
 // Get payment credentials for tenant
 paymentsRouter.get('/credentials', authenticate, async (req, res) => {
@@ -17,11 +14,11 @@ paymentsRouter.get('/credentials', authenticate, async (req, res) => {
 
     const credentials = await prisma.paymentCredential.findMany({
       where: { tenantId },
-      select: { 
-        id: true, 
-        provider: true, 
+      select: {
+        id: true,
+        provider: true,
         isActive: true,
-        createdAt: true 
+        createdAt: true
       },
     });
 
@@ -43,7 +40,6 @@ paymentsRouter.post('/credentials', authenticate, requireRole([UserRole.OWNER, U
     }
 
     // TODO: Encrypt credentials before storing
-    // For now, we'll store as-is but in production use crypto module
     const encryptedCredentials = JSON.stringify(credentials);
 
     const existing = await prisma.paymentCredential.findFirst({
@@ -69,11 +65,11 @@ paymentsRouter.post('/credentials', authenticate, requireRole([UserRole.OWNER, U
       });
     }
 
-    res.json({ 
-      id: result.id, 
-      provider: result.provider, 
+    res.json({
+      id: result.id,
+      provider: result.provider,
       isActive: result.isActive,
-      message: 'Credentials saved successfully' 
+      message: 'Credentials saved successfully'
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -103,10 +99,6 @@ paymentsRouter.delete('/credentials/:id', authenticate, requireRole(['OWNER']), 
     res.status(500).json({ error: error.message });
   }
 });
-
-// ============================================
-// MANUAL PAYMENT CONFIRMATION (Fallback)
-// ============================================
 
 // Confirm manual payment for order awaiting payment
 paymentsRouter.post('/orders/:orderId/confirm-manual', authenticate, requireRole([UserRole.CASHIER, UserRole.MANAGER, UserRole.OWNER]), async (req, res) => {
@@ -185,25 +177,29 @@ paymentsRouter.post('/orders/:orderId/confirm-manual', authenticate, requireRole
     });
 
     // Emit socket events
-    const io = (req.app as any).get('io');
-    (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('payment:confirmed', {
-      orderId,
-      orderNumber: order.orderNumber,
-      amount: amount || order.total,
-      method,
-    });
+    const io = getIo();
+    if (io) {
+      io.to(`${tenantId}:all`).emit('payment:confirmed', {
+        orderId,
+        orderNumber: order.orderNumber,
+        amount: amount || order.total,
+        method,
+      });
 
-    (io || await import(.utils/socket.)).to(`${tenantId}:kitchen`).emit('kitchen:new-order', {
-      orderId,
-      orderNumber: order.orderNumber,
-      type: order.type,
-      items: JSON.parse(JSON.stringify(await prisma.orderItem.findMany({ 
+      const orderItems = await prisma.orderItem.findMany({
         where: { orderId },
         include: { item: true }
-      }))),
-      notes: order.notes,
-      createdAt: order.createdAt,
-    });
+      });
+
+      io.to(`${tenantId}:kitchen`).emit('kitchen:new-order', {
+        orderId,
+        orderNumber: order.orderNumber,
+        type: order.type,
+        items: orderItems,
+        notes: order.notes,
+        createdAt: order.createdAt,
+      });
+    }
 
     res.json({ success: true, message: 'Payment confirmed' });
   } catch (error: any) {
@@ -212,11 +208,7 @@ paymentsRouter.post('/orders/:orderId/confirm-manual', authenticate, requireRole
   }
 });
 
-// ============================================
-// WEBHOOK HANDLER FOR PAYMENT GATEWAYS
-// ============================================
-
-// This is also defined in index.ts, but we'll add helper functions here
+// Webhook handler for payment gateways
 export async function processPaymentWebhook(
   tenantId: string,
   payload: any,
@@ -239,15 +231,13 @@ export async function processPaymentWebhook(
 
     for (const cred of credentials) {
       const creds = JSON.parse(cred.credentials);
-      
+
       if (cred.provider === 'peach') {
         // Peach Payments signature verification
-        // TODO: Implement proper HMAC verification
         providerName = 'peach';
         verified = true; // Placeholder - implement real verification
         orderReference = payload.reference || payload.merchantReference;
       } else if (cred.provider === 'manual') {
-        // Manual provider doesn't use webhooks
         continue;
       }
     }
@@ -277,7 +267,7 @@ export async function processPaymentWebhook(
       await tx.payment.create({
         data: {
           orderId: order.id,
-          method: 'MCB_JUICE', // or determine from payload
+          method: 'MCB_JUICE',
           amount: order.total,
           status: 'COMPLETED',
           metadata: {
@@ -333,9 +323,9 @@ export async function processPaymentWebhook(
     });
 
     // Emit socket event to POS
-    const io = (global as any).io;
+    const io = getIo();
     if (io) {
-      (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('payment:webhook-confirmed', {
+      io.to(`${tenantId}:all`).emit('payment:webhook-confirmed', {
         orderId: order.id,
         orderNumber: order.orderNumber,
         amount: order.total,
@@ -349,10 +339,6 @@ export async function processPaymentWebhook(
     throw error;
   }
 }
-
-// ============================================
-// REFUND PROCESSING
-// ============================================
 
 // Initiate refund through payment gateway
 paymentsRouter.post('/payments/:paymentId/refund', authenticate, requireRole([UserRole.MANAGER, UserRole.OWNER]), async (req, res) => {
@@ -389,23 +375,24 @@ paymentsRouter.post('/payments/:paymentId/refund', authenticate, requireRole([Us
         },
       });
 
-      const io = (req.app as any).get('io');
-      (io || await import(.utils/socket.)).to(`${tenantId}:all`).emit('payment:refunded', {
-        paymentId,
-        orderId: payment.orderId,
-        amount: amount || payment.amount,
-        reason,
-      });
+      const io = getIo();
+      if (io) {
+        io.to(`${tenantId}:all`).emit('payment:refunded', {
+          paymentId,
+          orderId: payment.orderId,
+          amount: amount || payment.amount,
+          reason,
+        });
+      }
 
       return res.json({ success: true, message: 'Cash refund recorded' });
     }
 
     // For card/digital payments, check if gateway refund is needed
-    // TODO: Implement actual gateway refund API calls
     console.log(`Gateway refund would be processed here for payment ${paymentId}`);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Refund initiated (gateway integration pending)',
       requiresManualProcessing: payment.method !== 'CASH'
     });
