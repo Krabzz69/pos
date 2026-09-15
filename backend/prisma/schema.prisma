@@ -1,0 +1,615 @@
+// Restaurant SaaS - Prisma Schema
+// Multi-tenant architecture with tenant isolation at query layer
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// TENANT & AUTH
+// ============================================
+
+model Tenant {
+  id              String   @id @default(uuid())
+  name            String
+  subdomain       String   @unique
+  slug            String   @unique
+  status          TenantStatus @default(ACTIVE)
+  plan            PlanTier @default(FREE)
+  settings        Json     @default("{}") // VAT rate, currency, receipt config, etc.
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  users           User[]
+  tables          Table[]
+  categories      Category[]
+  items           MenuItem[]
+  ingredients     Ingredient[]
+  recipes         Recipe[]
+  orders          Order[]
+  onlineOrders    OnlineOrder[]
+  shifts          Shift[]
+  suppliers       Supplier[]
+  purchaseOrders  PurchaseOrder[]
+  wasteLogs       WasteLog[]
+  paymentCredentials PaymentCredential[]
+  deliveryZones   DeliveryZone[]
+  auditLogs       AuditLog[]
+  
+  @@index([subdomain])
+  @@index([slug])
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  EXPIRED
+}
+
+enum PlanTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+model User {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  email           String
+  passwordHash    String
+  role            UserRole
+  pin             String?  // For POS quick login
+  name            String
+  phone           String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  orders          Order[]
+  shifts          Shift[]
+  auditLogs       AuditLog[]
+  
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+enum UserRole {
+  SUPERADMIN
+  OWNER
+  MANAGER
+  CASHIER
+  KITCHEN
+  WAITER
+}
+
+// ============================================
+// AUTH TOKENS
+// ============================================
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+}
+
+// ============================================
+// MENU STRUCTURE
+// ============================================
+
+model Category {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isAvailable Boolean  @default(true)
+  schedule    Json?    // Availability schedule {days: number[], startTime: string, endTime: string}
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  items       MenuItem[]
+  
+  @@index([tenantId])
+}
+
+model MenuItem {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  categoryId      String
+  category        Category @relation(fields: [categoryId], references: [id])
+  name            String
+  description     String?
+  price           Int      // In cents
+  photoUrl        String?
+  isAvailable     Boolean  @default(true)
+  manualOverride  ManualOverride @default(NONE) // NONE, FORCE_AVAILABLE, FORCE_UNAVAILABLE
+  sortOrder       Int      @default(0)
+  prepTimeMinutes Int      @default(10)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  variants        ItemVariant[]
+  modifiers       ItemModifier[]
+  recipes         Recipe[]
+  orderItems      OrderItem[]
+  onlineOrderItems OnlineOrderItem[]
+  
+  @@index([tenantId])
+  @@index([categoryId])
+}
+
+enum ManualOverride {
+  NONE
+  FORCE_AVAILABLE
+  FORCE_UNAVAILABLE
+}
+
+model ItemVariant {
+  id          String   @id @default(uuid())
+  itemId      String
+  item        MenuItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  name        String   // e.g., "Size", "Spice Level"
+  options     Json     // [{label: "Small", priceAdjustment: 0}, {label: "Large", priceAdjustment: 500}]
+  createdAt   DateTime @default(now())
+  
+  @@index([itemId])
+}
+
+model ItemModifier {
+  id          String   @id @default(uuid())
+  itemId      String
+  item        MenuItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  name        String   // e.g., "Extra Toppings", "Remove Onions"
+  options     Json     // [{label: "Extra Cheese", priceAdjustment: 200}, {label: "No Onions", priceAdjustment: 0}]
+  required    Boolean  @default(false)
+  maxSelections Int?
+  createdAt   DateTime @default(now())
+  
+  @@index([itemId])
+}
+
+// ============================================
+// INVENTORY & RECIPES
+// ============================================
+
+model Ingredient {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  name            String
+  unit            String   // kg, g, L, ml, pcs, cups
+  currentStock    Float    // Current stock level
+  lowStockThreshold Float  // Alert when below this
+  costPerUnit     Int      // In cents
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  recipes         Recipe[]
+  stockMovements  StockMovement[]
+  
+  @@index([tenantId])
+  @@unique([tenantId, name])
+}
+
+model Recipe {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  itemId          String
+  item            MenuItem @relation(fields: [itemId], references: [id])
+  ingredientId    String
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+  quantity        Float    // Amount needed for one portion
+  unit            String   // Must match ingredient unit
+  
+  @@unique([itemId, ingredientId])
+  @@index([itemId])
+  @@index([ingredientId])
+}
+
+model StockMovement {
+  id              String   @id @default(uuid())
+  tenantId        String
+  ingredientId    String
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+  type            StockMovementType
+  quantity        Float    // Positive for in, negative for out
+  reference       String?  // Order ID, PO number, etc.
+  reason          String?
+  performedBy     String
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+  @@index([ingredientId])
+}
+
+enum StockMovementType {
+  PURCHASE
+  ORDER_DEDUCTION
+  WASTE
+  STOCK_TAKE_ADJUSTMENT
+  RETURN
+}
+
+model Supplier {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  name            String
+  contactName     String?
+  phone           String?
+  email           String?
+  address         String?
+  createdAt       DateTime @default(now())
+  
+  ingredients     Ingredient[]
+  purchaseOrders  PurchaseOrder[]
+  
+  @@index([tenantId])
+}
+
+model PurchaseOrder {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  supplierId      String
+  supplier        Supplier @relation(fields: [supplierId], references: [id])
+  status          PurchaseOrderStatus @default(PENDING)
+  items           Json     // [{ingredientId, quantity, unitCost}]
+  totalCost       Int      // In cents
+  expectedDate    DateTime?
+  receivedDate    DateTime?
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+  @@index([supplierId])
+}
+
+enum PurchaseOrderStatus {
+  PENDING
+  RECEIVED
+  CANCELLED
+}
+
+model WasteLog {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  ingredientId    String
+  quantity        Float
+  reason          String
+  recordedBy      String
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+}
+
+// ============================================
+// TABLES (for dine-in)
+// ============================================
+
+model Table {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  number      String
+  capacity    Int?
+  section     String?  // "Indoor", "Outdoor", "VIP"
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  
+  orders      Order[]
+  
+  @@unique([tenantId, number])
+  @@index([tenantId])
+}
+
+// ============================================
+// ORDERS (POS - prefix P-)
+// ============================================
+
+model Order {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id])
+  orderNumber         String   // P-0001, P-0002...
+  type                OrderType
+  status              OrderStatus @default(PENDING)
+  tableId             String?
+  table               Table?   @relation(fields: [tableId], references: [id])
+  customerId          String?
+  customerName        String?
+  customerPhone       String?
+  customerAddress     String?
+  items               OrderItem[]
+  subtotal            Int      // In cents
+  discount            Int      @default(0) // Line + order discount
+  serviceCharge       Int      @default(0) // In cents
+  vat                 Int      // In cents
+  total               Int      // In cents
+  payments            Payment[]
+  parkedCart          Json?    // Saved cart data for park/resume
+  notes               String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  paidAt              DateTime?
+  
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  PENDING
+  AWAITING_PAYMENT
+  PAID
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+  PARKED
+}
+
+model OrderItem {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemId          String
+  item            MenuItem @relation(fields: [itemId], references: [id])
+  itemName        String   // Snapshot at time of order
+  quantity        Int
+  unitPrice       Int      // In cents (snapshot)
+  modifiers       Json?    // Selected modifiers/variants
+  notes           String?
+  lineDiscount    Int      @default(0)
+  status          OrderItemStatus @default(PENDING)
+  station         String?  // "grill", "fryer", "drinks"
+  createdAt       DateTime @default(now())
+  
+  @@index([orderId])
+}
+
+enum OrderItemStatus {
+  PENDING
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id])
+  method          PaymentMethod
+  amount          Int      // In cents
+  status          PaymentStatus @default(PENDING)
+  gatewayRef      String?
+  transactionId   String?
+  metadata        Json?    // Gateway response, change due, etc.
+  createdAt       DateTime @default(now())
+  
+  @@index([orderId])
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  MCB_JUICE
+  MOBILE_MONEY
+  SPLIT
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ============================================
+// ONLINE ORDERS (prefix W-)
+// ============================================
+
+model OnlineOrder {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id])
+  orderNumber         String   // W-0001, W-0002...
+  status              OnlineOrderStatus @default(RECEIVED)
+  type                OnlineOrderType
+  customerName        String
+  customerPhone       String
+  customerEmail       String?
+  customerAddress     String?
+  requestedTime       DateTime?
+  deliveryZoneId      String?
+  deliveryFee         Int      @default(0)
+  items               OnlineOrderItem[]
+  subtotal            Int
+  discount            Int      @default(0)
+  serviceCharge       Int      @default(0)
+  vat                 Int
+  total               Int
+  paymentMethod       PaymentMethod
+  paymentStatus       PaymentStatus @default(PENDING)
+  gatewayRef          String?
+  notes               String?
+  rejectionReason     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  acceptedAt          DateTime?
+  preparingAt         DateTime?
+  readyAt             DateTime?
+  dispatchedAt        DateTime?
+  completedAt         DateTime?
+  
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum OnlineOrderType {
+  PICKUP
+  DELIVERY
+}
+
+enum OnlineOrderStatus {
+  RECEIVED
+  ACCEPTED
+  REJECTED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+}
+
+model OnlineOrderItem {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           OnlineOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemId          String
+  item            MenuItem @relation(fields: [itemId], references: [id])
+  itemName        String
+  quantity        Int
+  unitPrice       Int
+  modifiers       Json?
+  notes           String?
+  lineDiscount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  
+  @@index([orderId])
+}
+
+model DeliveryZone {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  name            String
+  polygon         Json     // GeoJSON or simple boundary definition
+  fee             Int      // In cents
+  minimumOrder    Int      // In cents
+  estimatedTime   Int      // Minutes
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+}
+
+// ============================================
+// SHIFTS (cashier sessions)
+// ============================================
+
+model Shift {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  openingBalance  Int      // Starting cash in drawer
+  closingBalance  Int?     // Ending cash count
+  expectedBalance Int?     // Calculated from sales
+  overShort       Int?     // Difference
+  notes           String?
+  orders          Order[]
+  
+  @@index([tenantId])
+  @@index([userId])
+}
+
+// ============================================
+// PAYMENT CREDENTIALS (encrypted per tenant)
+// ============================================
+
+model PaymentCredential {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  provider        String   // "peach", "manual", etc.
+  credentials     String   // Encrypted JSON
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([tenantId])
+}
+
+// ============================================
+// AUDIT LOG
+// ============================================
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id])
+  action          String
+  entityType      String
+  entityId        String?
+  changes         Json?    // Before/after snapshot
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+  @@index([createdAt])
+}
+
+// ============================================
+// SUPERADMIN (single instance)
+// ============================================
+
+model Superadmin {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String
+  name            String
+  createdAt       DateTime @default(now())
+}
+
+model PlatformInvoice {
+  id              String   @id @default(uuid())
+  tenantId        String
+  amount          Int      // In cents
+  period          String   // "2024-01"
+  status          InvoiceStatus @default(PENDING)
+  createdAt       DateTime @default(now())
+  
+  @@index([tenantId])
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
