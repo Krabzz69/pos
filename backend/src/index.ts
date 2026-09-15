@@ -7,6 +7,10 @@ import { authRouter } from './modules/auth/auth.routes';
 import { tenantsRouter } from './modules/tenants/tenants.routes';
 import { menuRouter } from './modules/menu/menu.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
+import { ordersRouter } from './modules/orders/orders.routes';
+import { kitchenRouter } from './modules/kitchen/kitchen.routes';
+import { onlineRouter } from './modules/online/online.routes';
+import { paymentsRouter } from './modules/payments/payments.routes';
 import { setupSocketIO } from './utils/socket';
 import { PORT, NODE_ENV } from './config/env';
 
@@ -34,6 +38,10 @@ app.use('/api/auth', authRouter);
 app.use('/api/tenants', tenantsRouter);
 app.use('/api/menu', menuRouter);
 app.use('/api/inventory', inventoryRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/kitchen', kitchenRouter);
+app.use('/api/online', onlineRouter);
+app.use('/api/payments', paymentsRouter);
 
 // Payment webhook endpoint (for MCB Juice / Peach Payments)
 app.post('/api/webhooks/payments/:tenantId', async (req, res) => {
@@ -43,11 +51,17 @@ app.post('/api/webhooks/payments/:tenantId', async (req, res) => {
 
   console.log(`Payment webhook received for tenant ${tenantId}`);
   
-  // TODO: Verify signature based on payment provider
-  // TODO: Process payment and update order status
-  // TODO: Emit socket event to POS
-
-  res.status(200).json({ received: true });
+  try {
+    const { processPaymentWebhook } = await import('./modules/payments/payments.routes');
+    const result = await processPaymentWebhook(tenantId, payload, signature);
+    res.status(200).json(result);
+  } catch (error: any) {
+    console.error('Webhook processing error:', error);
+    res.status(400).json({ 
+      error: error.message,
+      received: true 
+    });
+  }
 });
 
 // Error handling middleware

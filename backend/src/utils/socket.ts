@@ -8,8 +8,10 @@ interface AuthSocket extends Socket {
   tenantId?: string;
 }
 
+export let io: Server | null = null;
+
 export function setupSocketIO(server: any) {
-  const io = new Server(server, {
+  io = new Server(server, {
     cors: {
       origin: process.env.NODE_ENV === 'production' ? false : true,
       credentials: true,
